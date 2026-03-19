@@ -1,14 +1,15 @@
 #include <cassert>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <elf.h>
 
 #include <memory.hh>
 
 using namespace mem;
+using namespace std;
 
 void
 memory::load_binary(const std::string& binfile)
@@ -38,54 +39,81 @@ memory::load_binary(const std::string& binfile)
 
 
     // read elf header
-    // El primer paso a realizar es el de leer la cabecera del binario.
-    // En memory.hh está definido Elf32_Ehdr _ehdr; 
-    // ELF header para saber el tipo de dato
-    const Elf32_Ehdr* _ehdr = *reinterpret_cast<Elf32_Ehdr*>(_binary.data());
+    _ehdr = *reinterpret_cast<Elf32_Ehdr*>(_binary.data());
 
     // ensure riscv32
-    //magic number
-    assert(_ehdr->e_ident[EI_MAG0] == ELFMAG0);
-    assert(_ehdr->e_ident[EI_MAG1] == ELFMAG1);
-    assert(_ehdr->e_ident[EI_MAG2] == ELFMAG2);
-    assert(_ehdr->e_ident[EI_MAG3] == ELFMAG3);
+    if(_ehdr.e_machine != EM_RISCV) {
+      std::cerr << "Invalid machine type: " << _ehdr.e_machine << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
 
-    // ensure 32-bit
-    assert(_ehdr->e_ident[EI_CLASS] == ELFCLASS32);
-
-    //Little endian
-    assert(_ehdr->e_ident[EI_DATA] == ELFDATA2LSB);
-
-    //RISC-V
-    // assert(_ehdr.e_machine == EM_RISCV);
+    // ensure the binary has a correct program table
+    if(_ehdr.e_phnum < 1) {
+      std::cerr << "No program header table" << std::endl;
+      std::exit(EXIT_FAILURE);
+    } 
+    
+    cout << "Machine type: " << _ehdr.e_machine << endl;
+    cout << "Number of Program Headers: " << _ehdr.e_phnum << endl;
+    cout << "Entry Point: 0x" << hex << _ehdr.e_entry << dec << endl;
 
     // entry point
-    _entry_point = _ehdr->e_entry;
-    // load sections in memory
-    // ensure the binary has a correct program table
-    assert(_entry_point == 0);
-    // read ELF program header table,
-    const Elf32_Phdr* _phdr = reinterpret_cast<const Elf32_Phdr*>(_binary.data() + _ehdr->e_phoff);
+
+    // read ELF program header table
+    //  _ehdr.e_phnum = numero entradas en la tabla de encabezados
+    //  _ehdr.e_phoff = offset de la tabla de encabezados
+    //  _ehdr.e_phentsize = tamaño de cada entrada en la tabla de encabezados
+    
     Elf32_Phdr phdr;
-    const size_t phdr_size = _ehdr->e_phentsize;
-    const size_t phdr_count = _ehdr->e_phnum;
-    const size_t phdr_offset = _ehdr->e_phoff;
+    for (int i = 0; i < _ehdr.e_phnum; i++) {
+      phdr = *reinterpret_cast<Elf32_Phdr*>(_binary.data() + _ehdr.e_phoff + i * _ehdr.e_phentsize);
 
-    for (size_t i = 0; i < phdr_count; ++i) {
-	phdr = *reinterpret_cast<Elf32_Phdr*>(_binary.data() + phdr_offset + i * phdr_size);
-        // load each segment into memory
-        if (_phdr[i].p_type == PT_LOAD) {
-            const auto offset = _phdr[i].p_offset;
-            const auto size = _phdr[i].p_filesz;
-            const auto vaddr = _phdr[i].p_vaddr;
+      cout << "Segment " << i << ": Type=" << phdr.p_type 
+        << ", Offset=" << phdr.p_offset << " Bytes,"
+        << " Virtual Address=0x" << hex << phdr.p_vaddr 
+        << ", Size=" << dec << phdr.p_filesz << " Bytes"
+        << endl;
 
-            // ensure we have enough space in memory
-            if (vaddr + size > _memory.size()) {
-            _memory.resize(vaddr + size);
-            }
 
-            // copy segment data into memory
-            std::memcpy(&_memory[vaddr], &_binary[offset], size);
+      _phdr.push_back(phdr);
+    }
+
+    
+    // load segments in memory
+    //  PT_LOAD = Indica que el segmento debe ser cargado en memoria
+    //  phdr.p_vaddr = dirección virtual donde se cargará el segmento
+    //  phdr.p_offset = offset en el archivo donde se encuentra el segmento
+    //  phdr.p_filesz = tamaño del segmento en el archivo
+    
+    segment s;
+    for (int i = 0; i < _ehdr.e_phnum; i++) {
+      phdr = _phdr[i];
+      if(phdr.p_type == PT_LOAD) {
+        s._initial_address = phdr.p_vaddr;
+        s._content.insert(s._content.begin(), _binary.begin() + phdr.p_offset, _binary.begin() + phdr.p_offset + phdr.p_filesz);
+
+        cout << "Loading segment at 0x" << hex << s._initial_address 
+          << " with size " << dec << s._content.size() << " Bytes" << endl;
+
+        _segments.push_back(s);
         }
     }
+}
+
+void memory::dump_binary(size_t segment_id)const {
+  if(segment_id >= _segments.size()) {
+    std::cerr << "Invalid segment id" << std::endl;
+    return;
+  }
+
+  std::cout << "Segment " << segment_id << " at 0x" << hex << _segments[segment_id]._initial_address << dec << std::endl;
+  std::cout << "Size: " << _segments[segment_id]._content.size() << " Bytes" << std::endl;
+
+  for(size_t i = 0; i < _segments[segment_id]._content.size(); ++i) {
+    if(i % 16 == 0) {
+      std::cout << std::endl << "0x" << hex << _segments[segment_id]._initial_address + i << ": ";
+    }
+    std::cout << hex << static_cast<int>(_segments[segment_id]._content[i]) << " ";
+  }
+  std::cout << std::endl;
 }

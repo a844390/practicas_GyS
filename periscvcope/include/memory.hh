@@ -54,6 +54,7 @@ class memory
   {
     // find the segment
     auto seg_idx = find_segment(addr);
+    std::cerr << "Attempt to read in address: " << std::hex << addr << std::endl;
     assert(seg_idx != -1);
 
     // read the data
@@ -83,6 +84,7 @@ class memory
     }
 
         void load_binary(const std::string& binfile);
+        void dump_binary(size_t segment_id) const;
 
   address_t entry_point() const { return _ehdr.e_entry; }
 };
