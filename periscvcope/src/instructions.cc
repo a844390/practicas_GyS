@@ -143,33 +143,46 @@ uint32_t instrs::store(memory& mem, processor & proc, uint32_t bitstream) {
   return proc.next_pc();
 }
 
-// Arithmetic Inmediate
+// *****************************************************************
+// ALU CON INMEDIATO (ALUI)
+// Opera entre el valor de rs1 y un inmediato con signo
+// *****************************************************************
 uint32_t instrs::alui(mem::memory &, processor &proc, uint32_t bitstream) {
   i_instruction ii(bitstream);
-  uint32_t val = proc.read_reg(ii.rs1());
+  uint32_t val = proc.read_reg(ii.rs1()); // Operando fuente
 
   switch (ii.funct3()) {
-    case 0b000: // ADDI
+    case 0b000: // ADDI -> suma rs1 + imm con signo
       proc.write_reg(ii.rd(), val + ii.imm());
       break;
-    case 0b001: // SLLI
+    case 0b001: // SLLI -> desplazamiento lógico a la izquierda
+      // Solo los 5 bits bajos del inmediato indican el número de posiciones (0-31)
       proc.write_reg(ii.rd(), val << (ii.imm() & 0x1F));
       break;
-    case 0b111: // ANDI
+    case 0b111: // ANDI -> AND bit a bit con inmediato
+      // Usado por soft_mul para aislar el bit menos significativo: andi a5,a5,1
       proc.write_reg(ii.rd(), val & ii.imm());
       break;
-    case 0b101: // SRLI / SRAI
+    case 0b101: // SRLI o SRAI -> desplazamiento lógico o aritmético a la derecha 
+      // El bit 10 del inmediato distingue las dos variantes:
+      //   0 -> SRLI: rellena con ceros (lógico)
+      //   1 -> SRAI: replica el bit de signo (aritmético)
       if ((ii.imm() >> 10) & 1) {
-        proc.write_reg(ii.rd(), (int32_t)val >> (ii.imm() & 0x1F)); // SRAI
+        // SRAI: cast a int32_t para que el desplazamiento sea aritmético
+        proc.write_reg(ii.rd(), (int32_t)val >> (ii.imm() & 0x1F));
       } else {
-        proc.write_reg(ii.rd(), val >> (ii.imm() & 0x1F)); // SRLI
+        // SRLI: desplazamiento lógico (rellena con 0s)
+        proc.write_reg(ii.rd(), val >> (ii.imm() & 0x1F));
       }
       break;
   }
   return proc.next_pc();
 }
 
-// Arithmetic Register
+// *****************************************************************
+// ALU ENTRE REGISTROS (ALUR)
+// funct3 selecciona la operación; funct7 distingue variantes (ADD, SUB, MUL)
+// *****************************************************************
 uint32_t instrs::alur(mem::memory &, processor &proc, uint32_t bitstream) {
   r_instruction ri(bitstream);
 
@@ -178,11 +191,14 @@ uint32_t instrs::alur(mem::memory &, processor &proc, uint32_t bitstream) {
 
   switch (ri.funct3()) {
     case 0b000: // ADD o MUL
-      if (ri.funct7() == 0b0000000) { // ADD
+      if (ri.funct7() == 0b0000000) {
+        // ADD: suma sin signo
         proc.write_reg(ri.rd(), val1 + val2);
-      } else if (ri.funct7() == 0b0000001) { // MUL
+      } else if (ri.funct7() == 0b0000001) {
+        // MUL: multiplicación
         proc.write_reg(ri.rd(), val1 * val2);
-      } else if (ri.funct7() == 0b0100000) { // SUB
+      } else if (ri.funct7() == 0b0100000) {
+        // SUB: resta. También cubre NEG cuando rs1 == x0
         proc.write_reg(ri.rd(), val1 - val2);
       }
       break;
