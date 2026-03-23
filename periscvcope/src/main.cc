@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 
     // Cada entrada mapea los 7 bits del opcode RV32I a la función que
     // fetch-decodifica-ejecuta ese tipo de instrucción.
-    std::map <uint8_t, instr_emulation> dispatch_map = {
+    std::unordered_map <uint8_t, instr_emulation> dispatch_map = {
         {0b0000011, instrs::load}, // LOAD  (LW, LH, LB, LHU, LBU)
         {0b0100011, instrs::store}, // STORE (SW, SH, SB)
         {0b0010011, instrs::alui}, // ALU inmediato
